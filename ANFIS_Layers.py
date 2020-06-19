@@ -1,6 +1,11 @@
+'''
+This files defines the classes for all necessary layers of the ANFIS model
+'''
+
 import tensorflow as tf
 import numpy as np
 import itertools
+import calc_mf
 
 
 class FuzzyficationLayer(tf.keras.layers.Layer):
@@ -11,31 +16,75 @@ class FuzzyficationLayer(tf.keras.layers.Layer):
     def __init__(self, num_inputs, num_mf, **kwargs):
         self.num_inputs = num_inputs
         self.num_mf = num_mf
-        self.output_dim = self.num_mf*num_inputs
+        self.output_dim = num_mf*num_inputs
         super(FuzzyficationLayer, self).__init__(**kwargs)
 
     def build(self, input_shape):
         '''
-        This layer must have two built in parameters for each membership
-        function of the inputs of the model. This is due to the used mf used
-        (gaussian), which requires two parameters: the variance and the mean
+        This layer must have a certain number of built in parameters for each
+        membership function of the inputs of the model. This number derives from the
+        mf used, and it should be implemented for each subclass
         '''
-        self.parameters = self.add_weight(shape=(self.output_dim*self.num_mf, 2), trainable=False)
         super(FuzzyficationLayer, self).build(input_shape)
 
+
+class FuzzyficationLayer_gaussian(FuzzyficationLayer):
+    def __init__(self, num_inputs, num_mf, **kwargs):
+        super(FuzzyficationLayer_gaussian, self).__init__(num_inputs, num_mf, **kwargs)
+
+    def build(self, input_shape):
+        self.parameters = self.add_weight(shape=(self.num_inputs*self.num_mf, 2), trainable=True)
+        super(FuzzyficationLayer_gaussian, self).build(input_shape)
+
     def call(self, x):
-        '''
-        Gaussian membership function to provide differentiable function through
-        out the model (guarantee backpropagation)
-        '''
         output = []
         offset = 0
         for i in range(self.num_inputs):
             for j in range(self.num_mf):
                 mi = self.parameters[offset + j][0]
                 sigma = self.parameters[offset + j][1]
-                output.append(tf.math.exp((-(x[0][i] - mi)**2)/2*sigma**2))
+                output.append(calc_mf.gaussian(mi, sigma, x[0][i]))
             offset += self.num_mf
+        return output
+
+
+class FuzzyficationLayer_bell(FuzzyficationLayer):
+    def __init__(self, num_inputs, num_mf, **kwargs):
+        super(FuzzyficationLayer_bell, self).__init__(num_inputs, num_mf, **kwargs)
+
+    def build(self, input_shape):
+        self.parameters = self.add_weight(shape=(self.num_inputs*self.num_mf, 3), trainable=True)
+        super(FuzzyficationLayer_gaussian, self).build(input_shape)
+
+    def call(self, x):
+        output = []
+        offset = 0
+        for i in range(self.num_inputs):
+            for j in range(self.num_mf):
+                a = self.parameters[offset + j][0]
+                b = self.parameters[offset + j][1]
+                c = self.parameters[offset + j][2]
+                output.append(calc_mf.bell(a, b, c, x[0][i]))
+        return output
+
+
+class FuzzyficationLayer_triangular(FuzzyficationLayer):
+    def __init__(self, num_inputs, num_mf, **kwargs):
+        super(FuzzyficationLayer_triangular, self).__init__(num_inputs, num_mf, **kwargs)
+
+    def build(self, input_shape):
+        self.parameters = self.add_weight(shape=(self.num_inputs*self.num_mf, 3), trainable=True)
+        super(FuzzyficationLayer_gaussian, self).build(input_shape)
+
+    def call(self, x):
+        output = []
+        offset = 0
+        for i in range(self.num_inputs):
+            for j in range(self.num_mf):
+                a = self.parameters[offset + j][0]
+                b = self.parameters[offset + j][1]
+                c = self.parameters[offset + j][2]
+                output.append(calc_mf.triangular(a, b, c, x[0][i]))
         return output
 
 
@@ -115,14 +164,15 @@ class ConsequentRules(tf.keras.layers.Layer):
         In fact, the first part of the node operations in this layer could be
         replaced with a built in Dense layer of Keras
         '''
-        self.parameters = self.add_weight(shape=(self.num_inputs, self.output_dim), trainable=True)
+        self.parameters = self.add_weight(shape=(self.num_inputs, input_dim[-1].as_list()[0]), trainable=True)
+        self.bias = self.add_weight(shape=(1,self.output_dim))
         super(ConsequentRules, self).build(input_dim)
 
     def call(self, x):
         # Separate the two inputs of this layer
         original_inputs, cons_rules_inputs = x
         # Dense operations
-        original_inputs = tf.transpose(tf.matmul(original_inputs, self.parameters))
+        original_inputs = tf.transpose(tf.matmul(original_inputs, self.parameters) + self.bias)
         output = []
         # Multiply result of dense with the output of layer 3
         for i in range(self.num_mf**self.num_inputs):
