@@ -1,7 +1,7 @@
 '''
 Terminal tool for defining an ANFIS model and training it without getting to code.
 This only allows a small set of control over the creation and fitting of the model,
-compared to all the tools tensorflow and keras provides
+compared to all the tools tensorflow and keras provides teste roberto
 '''
 
 import argparse
